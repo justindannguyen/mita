@@ -49,8 +49,37 @@ class RestClientGenerator extends AbstractSystemResourceGenerator {
 		// TODO: infer buffer size based on signal instance use - at the moment generators have no way of doing that
 		val httpBodyBufferSize = 512;
 		val baseUrl = new URL(configuration.getString('endpointBase'));
+		val headerContent = new URL(configuration.getString('headerContent'));
 		
 		codeFragmentProvider.create('''
+		retcode_t serializeMyHeaders(OutMsgSerializationHandover_T* handover)
+		{
+		    handover->len = 0;
+		    handover->position = 0;
+		    static const char* headers = "«headerContent»";
+			const char* headerStart = headers;
+			const char* headerEnd = strchr(headers, '\\n');
+
+			while (headerEnd != NULL) {
+				size_t headerLength = headerEnd - headerStart;
+				TcpMsg_copyStaticContent(handover, headerStart, headerLength);
+				TcpMsg_copyStaticContent(handover, "\\r\\n", 2);
+				handover->position++;
+				headerStart = headerEnd + 1;  // Move past \n
+				headerEnd = strchr(headerStart, '\\n');
+			}
+
+        	// Copy the last header if it exists and doesn't end with \n
+			if (*headerStart != '\\0') {
+				TcpMsg_copyStaticContent(handover, headerStart, strlen(headerStart));
+				TcpMsg_copyStaticContent(handover, "\\r\\n", 2);
+				handover->position++;
+			}
+
+			return RC_OK;
+
+		}
+
 		/**
 		 * @brief API responsible to pass the payload to the requested URL
 		 *
@@ -160,6 +189,8 @@ class RestClientGenerator extends AbstractSystemResourceGenerator {
 		}
 		
 		HttpMsg_setContentType(msg_ptr, "«contentType»");
+		HttpMsg_serializeCustomHeaders(msg_ptr, &serializeMyHeaders);
+
 		rc = Msg_prependPartFactory(msg_ptr, &httpPayloadSerializer);
 		if (rc != RC_OK) {
 			return rc;
